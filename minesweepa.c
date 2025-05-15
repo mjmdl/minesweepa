@@ -7,6 +7,7 @@
 #include <raylib.h>
 
 #define UNREACHABLE() assert(false)
+#define NOOP() /* no-op */
 
 typedef enum Cell {
 	CELL_NOTHING = 0,
@@ -15,13 +16,6 @@ typedef enum Cell {
 	CELL_FLAG = 1 << 2,
 } Cell;
 
-typedef struct Field {
-	int rows;
-	int columns;
-	int bombs;
-	char cells[];
-} Field;
-
 typedef enum State {
 	STATE_PLAY = 0,
 	STATE_WON,
@@ -29,10 +23,15 @@ typedef enum State {
 } State;
 
 typedef struct Game {
-	int flags;
 	State state;
+	int flags;
+	int revealed;
 	float bomb_density;
-	Field *field;
+	int rows;
+	int columns;
+	int bombs;
+	int cell_size;
+	char cells[];
 } Game;
 
 typedef struct Tilemap {
@@ -46,7 +45,6 @@ typedef struct Tilemap {
 static Tilemap *load_tilemap(void) {
 	const char *file_path = "tileset.png";
 	int tile_size = 16;
-	
 	Tilemap *tilemap = MemAlloc(sizeof *tilemap);
 	assert(tilemap != NULL);
 	
@@ -67,46 +65,54 @@ static Tilemap *load_tilemap(void) {
 	return tilemap;
 }
 
-static Field *create_field(int rows, int columns, float bomb_density) {
-	Field *field = MemAlloc((sizeof *field) + (sizeof *field->cells) * rows * columns);
-	assert(field != NULL);
-
-	field->rows = rows;
-	field->columns = columns;
-	field->bombs = rows * columns * bomb_density;
+static Game *create_game(int rows, int columns, float bomb_density, int cell_size) {
+	Game *game = MemAlloc((sizeof *game) + (sizeof *game->cells) * rows * columns);
+	assert(game != NULL);
+	game->state = STATE_PLAY;
+	game->flags = 0;
+	game->revealed = 0;
+	game->bomb_density = 0.25f;
+	game->rows = rows;
+	game->columns = columns;
+	game->bombs = rows * columns * bomb_density;
+	game->cell_size = cell_size;
 
 	SetRandomSeed(time(NULL));
-	for (int planted = 0; planted < field->bombs; ) {
+	for (int planted = 0; planted < game->bombs; ) {
 		int x = GetRandomValue(0, columns - 1);
 		int y = GetRandomValue(0, rows - 1);
-		char *cell = &field->cells[y * columns + x];
+		char *cell = &game->cells[y * columns + x];
 		if (!(*cell & CELL_BOMB)) {
 			*cell |= CELL_BOMB;
 			++planted;
 		}
 	}
-
-	return field;
+	
+	return game;
 }
 
-static void destroy_field(Field *field) {
-	MemFree(field);
+static void destroy_game(Game *game) {
+	MemFree(game);
 }
 
-static int count_danger(const Field *field, int x, int y) {
+static int count_adjacent_bombs(const Game *game, int x, int y) {
 	int danger = 0;
 	for (int row = y - 1; row <= y + 1; ++row) {
-		if (0 > row || row >= field->rows) {
+		if (0 > row || row >= game->rows) {
 			continue;
 		}
+		
 		for (int column = x - 1; column <= x + 1; ++column) {
 			if (row == y && column == x) {
 				continue;
 			}
-			if (0 > column || column >= field->columns) {
+			
+			if (0 > column || column >= game->columns) {
 				continue;
 			}
-			if (field->cells[row * field->columns + column]) {
+			
+			char cell = game->cells[row * game->columns + column];
+			if (cell & CELL_BOMB) {
 				++danger;
 			}
 		}
@@ -114,8 +120,8 @@ static int count_danger(const Field *field, int x, int y) {
 	return danger;
 }
 
-static void draw_field(const Game *game, const Tilemap *tilemap, int cell_size) {
-	const Field *field = game->field;
+static void draw_field(const Game *game, const Tilemap *tilemap) {
+	int cell_size = game->cell_size;
 
 	Rectangle rectangle;
 	rectangle.width = cell_size;
@@ -124,16 +130,16 @@ static void draw_field(const Game *game, const Tilemap *tilemap, int cell_size) 
 	int mouse_x = GetMouseX();
 	int mouse_y = GetMouseY();
 	
-	for (int y = 0; y < field->rows; ++y) {
+	for (int y = 0; y < game->rows; ++y) {
 		rectangle.y = y * cell_size;
-
-		for (int x = 0; x < field->columns; ++x) {
+		
+		for (int x = 0; x < game->columns; ++x) {
 			rectangle.x = x * cell_size;
-
+			
 			Rectangle tile = tilemap->blank;
 			Color tint = WHITE;
-			char cell = field->cells[y * field->columns + x];
-
+			
+			char cell = game->cells[y * game->columns + x];
 			if (game->state == STATE_PLAY) {
 				if (
 					(x * cell_size < mouse_x && mouse_x < (x + 1) * cell_size) &&
@@ -143,7 +149,7 @@ static void draw_field(const Game *game, const Tilemap *tilemap, int cell_size) 
 				}
 				
 				if (cell & CELL_KNOWN) {
-					int danger = count_danger(field, x, y);
+					int danger = count_adjacent_bombs(game, x, y);
 					assert(0 <= danger && danger <= 8);
 					tile = tilemap->numbers[danger];
 				} else if (cell & CELL_FLAG) {
@@ -155,7 +161,7 @@ static void draw_field(const Game *game, const Tilemap *tilemap, int cell_size) 
 				} else if (cell & CELL_BOMB) {
 					tile = tilemap->bomb;
 				} else {
-					int danger = count_danger(field, x, y);
+					int danger = count_adjacent_bombs(game, x, y);
 					assert(0 <= danger && danger <= 8);
 					tile = tilemap->numbers[danger];
 				}
@@ -165,7 +171,7 @@ static void draw_field(const Game *game, const Tilemap *tilemap, int cell_size) 
 				} else if (cell & CELL_FLAG) {
 					tile = tilemap->flag;
 				} else if (cell & CELL_KNOWN) {
-					int danger = count_danger(field, x, y);
+					int danger = count_adjacent_bombs(game, x, y);
 					assert(0 <= danger && danger <= 8);
 					tile = tilemap->numbers[danger];
 				}
@@ -178,31 +184,89 @@ static void draw_field(const Game *game, const Tilemap *tilemap, int cell_size) 
 	}
 }
 
+static int reveal_adjacent_cells(Game *game, int x, int y) {
+	int revealed = 0;
+	for (int row = y - 1; row <= y + 1; ++row) {
+		if (0 > row || row >= game->rows) {
+			continue;
+		}
+		
+		for (int column = x - 1; column <= x + 1; ++column) {
+			if (row == y && column == x) {
+				continue;
+			}
+			
+			if (0 > column || column >= game->columns) {
+				continue;
+			}
+			
+			char *cell = &game->cells[row * game->columns + column];
+			if (*cell & (CELL_KNOWN | CELL_BOMB)) {
+				continue;
+			}
+			
+			*cell |= CELL_KNOWN;
+			if (count_adjacent_bombs(game, column, row) == 0) {
+				revealed += reveal_adjacent_cells(game, column, row);
+			}
+		}
+	}
+	return revealed;
+}
+
+static void handle_input(Game *game) {
+	if (game->state != STATE_PLAY) {
+		return;
+	}
+	int x = GetMouseX() / game->cell_size;
+	int y = GetMouseY() / game->cell_size;
+	if (IsMouseButtonReleased(0)) {
+		char *cell = &game->cells[y * game->columns + x];
+		if (*cell & CELL_FLAG) {
+			NOOP();
+		} else if (*cell & CELL_BOMB) {
+			game->state = STATE_LOST;
+		} else if (!(*cell & CELL_KNOWN)) {
+			*cell |= CELL_KNOWN;
+			if (count_adjacent_bombs(game, x, y) == 0) {
+				game->revealed += 1 + reveal_adjacent_cells(game, x, y);
+			}
+		}
+	} else if (IsMouseButtonReleased(1)) {
+		char *cell = &game->cells[y * game->columns + x];
+		if (*cell & CELL_KNOWN) {
+			NOOP();
+		} else if (*cell & CELL_FLAG) {
+			*cell &= ~CELL_FLAG;
+		} else {
+			*cell |= CELL_FLAG;
+		}
+	}
+}
+
 int main(void) {
 	int cell_size = 100;
 	int rows = 12;
 	int columns = 16;
 	int window_width = columns * cell_size;
 	int window_height = rows * cell_size;
+	float bomb_density = 0.2f;
+	
 	const char *window_title = "Minesweepa";
 	InitWindow(window_width, window_height, window_title);
 
 	Tilemap *tilemap = load_tilemap();
-
-	Game game = {0};
-	game.flags = 0;
-	game.state = STATE_PLAY;
-	game.bomb_density = 0.25f;
-	game.field = create_field(rows, columns, game.bomb_density);
-
+	Game *game = create_game(rows, columns, bomb_density, cell_size);
+	
 	while (!WindowShouldClose()) {
 		BeginDrawing();
 			ClearBackground(GRAY);
-			draw_field(&game, tilemap, cell_size);
+			handle_input(game);
+			draw_field(game, tilemap);
 		EndDrawing();
 	}
 
-	destroy_field(game.field);
+	destroy_game(game);
 	CloseWindow();
 	return 0;
 }
