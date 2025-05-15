@@ -2,11 +2,11 @@ CC = gcc
 CFLAGS = -Wall -Wextra -O2 -g -I./raylib/src
 LDFLAGS = -L./raylib/src -lraylib -lm -ldl -lpthread -lGL
 
-SRC = mines.c
+SRC = minesweepa.c
 OBJ_DIR = build
 BIN_DIR = build
-TARGET = $(BIN_DIR)/mines
-OBJ = $(OBJ_DIR)/mines.o
+TARGET = $(BIN_DIR)/minesweepa
+OBJ = $(OBJ_DIR)/minesweepa.o
 
 RAYLIB_DIR = ./raylib
 RAYLIB_LIB = $(RAYLIB_DIR)/src/libraylib.a
