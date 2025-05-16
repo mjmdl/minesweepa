@@ -77,23 +77,27 @@ static Game *create_game(int rows, int columns, float bomb_density, int cell_siz
 	game->columns = columns;
 	game->bombs = rows * columns * bomb_density;
 	game->cell_size = cell_size;
-
-	SetRandomSeed(time(NULL));
-	for (int planted = 0; planted < game->bombs; ) {
-		int x = GetRandomValue(0, columns - 1);
-		int y = GetRandomValue(0, rows - 1);
-		char *cell = &game->cells[y * columns + x];
-		if (!(*cell & CELL_BOMB)) {
-			*cell |= CELL_BOMB;
-			++planted;
-		}
-	}
-	
 	return game;
 }
 
 static void destroy_game(Game *game) {
 	MemFree(game);
+}
+
+static void plant_bombs(Game *game, int safe_x, int safe_y) {
+	SetRandomSeed(time(NULL));
+	for (int planted = 0; planted < game->bombs; ) {
+		int x = GetRandomValue(0, game->columns - 1);
+		int y = GetRandomValue(0, game->rows - 1);
+		if ((safe_x - 1 <= x && x <= safe_x + 1) && (safe_y - 1 <= y && y <= safe_y + 1)) {
+			continue;
+		}
+		char *cell = &game->cells[y * game->columns + x];
+		if (!(*cell & CELL_BOMB)) {
+			*cell |= CELL_BOMB;
+			++planted;
+		}
+	}
 }
 
 static int count_adjacent_bombs(const Game *game, int x, int y) {
@@ -231,6 +235,9 @@ static void handle_input(Game *game) {
 		} else if (*cell & CELL_BOMB) {
 			game->state = STATE_LOST;
 		} else if (!(*cell & CELL_KNOWN)) {
+			if (game->revealed == 0) {
+				plant_bombs(game, x, y);
+			}
 			*cell |= CELL_KNOWN;
 			if (count_adjacent_bombs(game, x, y) == 0) {
 				game->revealed += 1 + reveal_adjacent_cells(game, x, y);
