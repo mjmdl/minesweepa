@@ -20,6 +20,7 @@ typedef enum State {
 	STATE_PLAY = 0,
 	STATE_WON,
 	STATE_LOST,
+	STATE_RESTART,
 } State;
 
 typedef struct Game {
@@ -215,6 +216,9 @@ static int reveal_adjacent_cells(Game *game, int x, int y) {
 }
 
 static void handle_input(Game *game) {
+	if (IsKeyReleased(KEY_SPACE)) {
+		game->state = STATE_RESTART;
+	}
 	if (game->state != STATE_PLAY) {
 		return;
 	}
@@ -262,6 +266,12 @@ int main(void) {
 		BeginDrawing();
 			ClearBackground(GRAY);
 			handle_input(game);
+
+			if (game->state == STATE_RESTART) {
+				destroy_game(game);
+				game = create_game(rows, columns, bomb_density, cell_size);
+			}
+			
 			draw_field(game, tilemap);
 		EndDrawing();
 	}
