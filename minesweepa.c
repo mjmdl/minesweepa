@@ -32,6 +32,8 @@ typedef struct Game {
 	int columns;
 	int bombs;
 	int cell_size;
+	float start_time;
+	float finish_time;
 	char cells[];
 } Game;
 
@@ -79,6 +81,8 @@ static Game *create_game(int rows, int columns, float bomb_density, int cell_siz
 	game->columns = columns;
 	game->bombs = rows * columns * bomb_density;
 	game->cell_size = cell_size;
+	game->start_time = GetTime();
+	game->finish_time = 0.0f;
 	return game;
 }
 
@@ -128,6 +132,60 @@ static int count_adjacent_bombs(const Game *game, int x, int y) {
 		}
 	}
 	return danger;
+}
+
+static void draw_ui(const Game *game, const Tilemap *tilemap) {
+	int window_width = game->columns * game->cell_size;
+	int window_height = game->rows * game->cell_size;
+
+	const Color icon_tint = {255, 255, 255, 128};
+	const Color font_color = {0, 0, 0, 200};
+	
+	const int margin = 32;
+	const int padding = 64;
+	const int font_spacing = 32;
+	const int font_size = 48;
+	const int icon_size = font_size;
+	
+	int x = margin;
+	int y = margin;
+	char buffer[32];
+	Rectangle rectangle = {.width = font_size, .height = font_size};
+	Vector2 origin = {0, 0};
+	float rotation = 0.0f;
+
+	rectangle.x = x;
+	rectangle.y = y;
+	DrawTexturePro(tilemap->texture, tilemap->bomb, rectangle, origin, rotation, icon_tint);
+
+	x += font_size + font_spacing;
+
+	snprintf(buffer, sizeof buffer, "%d", game->bombs);
+	DrawText(buffer, x, y, icon_size, font_color);
+
+	x += font_size + padding;
+
+	rectangle.x = x;
+	rectangle.y = y;
+	DrawTexturePro(tilemap->texture, tilemap->flag, rectangle, origin, rotation, icon_tint);
+
+	x += font_size + font_spacing;
+	
+	snprintf(buffer, sizeof buffer, "%d", game->flags);
+	DrawText(buffer, x, y, icon_size, font_color);
+
+	x = margin;
+	y += font_size + font_spacing;
+
+	snprintf(buffer, sizeof buffer, "%d/%d", game->revealed, game->rows * game->columns - game->bombs);
+	DrawText(buffer, x, y, icon_size, font_color);
+
+	x = margin;
+	y = window_height - margin - font_size;
+
+	int time = game->state == STATE_PLAY ? (GetTime() - game->start_time) : (game->finish_time - game->start_time);	
+	snprintf(buffer, sizeof buffer, "%d s", time);
+	DrawText(buffer, x, y, icon_size, YELLOW);	
 }
 
 static void draw_field(const Game *game, const Tilemap *tilemap) {
@@ -197,8 +255,7 @@ static void draw_field(const Game *game, const Tilemap *tilemap) {
 	}
 }
 
-static int reveal_adjacent_cells(Game *game, int x, int y) {
-	int revealed = 0;
+static void reveal_adjacent_cells(Game *game, int x, int y) {
 	for (int row = y - 1; row <= y + 1; ++row) {
 		if (0 > row || row >= game->rows) {
 			continue;
@@ -218,12 +275,13 @@ static int reveal_adjacent_cells(Game *game, int x, int y) {
 			}
 			
 			*cell |= CELL_KNOWN;
+			++game->revealed;
+			
 			if (count_adjacent_bombs(game, column, row) == 0) {
-				revealed += reveal_adjacent_cells(game, column, row);
+				reveal_adjacent_cells(game, column, row);
 			}
 		}
 	}
-	return revealed;
 }
 
 static void handle_input(Game *game) {
@@ -244,6 +302,7 @@ static void handle_input(Game *game) {
 		}
 		else if (*cell & CELL_BOMB) {
 			game->state = STATE_LOST;
+			game->finish_time = GetTime();
 		}
 		else if (!(*cell & CELL_KNOWN)) {
 			if (game->revealed == 0) {
@@ -251,9 +310,10 @@ static void handle_input(Game *game) {
 			}
 			
 			*cell |= CELL_KNOWN;
+			++game->revealed;
 			
 			if (count_adjacent_bombs(game, x, y) == 0) {
-				game->revealed += 1 + reveal_adjacent_cells(game, x, y);
+				reveal_adjacent_cells(game, x, y);
 			}
 		}
 	} else if (IsMouseButtonReleased(1)) {
@@ -263,9 +323,11 @@ static void handle_input(Game *game) {
 		}
 		else if (*cell & CELL_FLAG) {
 			*cell &= ~CELL_FLAG;
+			--game->flags;
 		}
 		else {
 			*cell |= CELL_FLAG;
+			++game->flags;
 		}
 	}
 }
@@ -293,8 +355,9 @@ int main(void) {
 				destroy_game(game);
 				game = create_game(rows, columns, bomb_density, cell_size);
 			}
-			
+
 			draw_field(game, tilemap);
+			draw_ui(game, tilemap);
 		EndDrawing();
 	}
 
