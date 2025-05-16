@@ -46,6 +46,7 @@ typedef struct Tilemap {
 static Tilemap *load_tilemap(void) {
 	const char *file_path = "tileset.png";
 	int tile_size = 16;
+	
 	Tilemap *tilemap = MemAlloc(sizeof *tilemap);
 	assert(tilemap != NULL);
 	
@@ -53,6 +54,7 @@ static Tilemap *load_tilemap(void) {
 	tilemap->blank = CLITERAL(Rectangle){0 * tile_size, 0 * tile_size, tile_size, tile_size};
 	tilemap->flag = CLITERAL(Rectangle){1 * tile_size, 0 * tile_size, tile_size, tile_size};
 	tilemap->bomb = CLITERAL(Rectangle){2 * tile_size, 0 * tile_size, tile_size, tile_size};
+	
 	tilemap->numbers[0] = CLITERAL(Rectangle){3 * tile_size, 0 * tile_size, tile_size, tile_size};
 	tilemap->numbers[1] = CLITERAL(Rectangle){0 * tile_size, 1 * tile_size, tile_size, tile_size};
 	tilemap->numbers[2] = CLITERAL(Rectangle){1 * tile_size, 1 * tile_size, tile_size, tile_size};
@@ -62,13 +64,13 @@ static Tilemap *load_tilemap(void) {
 	tilemap->numbers[6] = CLITERAL(Rectangle){1 * tile_size, 2 * tile_size, tile_size, tile_size};
 	tilemap->numbers[7] = CLITERAL(Rectangle){2 * tile_size, 2 * tile_size, tile_size, tile_size};
 	tilemap->numbers[8] = CLITERAL(Rectangle){3 * tile_size, 2 * tile_size, tile_size, tile_size};
-
 	return tilemap;
 }
 
 static Game *create_game(int rows, int columns, float bomb_density, int cell_size) {
 	Game *game = MemAlloc((sizeof *game) + (sizeof *game->cells) * rows * columns);
 	assert(game != NULL);
+
 	game->state = STATE_PLAY;
 	game->flags = 0;
 	game->revealed = 0;
@@ -86,12 +88,16 @@ static void destroy_game(Game *game) {
 
 static void plant_bombs(Game *game, int safe_x, int safe_y) {
 	SetRandomSeed(time(NULL));
+	
 	for (int planted = 0; planted < game->bombs; ) {
 		int x = GetRandomValue(0, game->columns - 1);
 		int y = GetRandomValue(0, game->rows - 1);
-		if ((safe_x - 1 <= x && x <= safe_x + 1) && (safe_y - 1 <= y && y <= safe_y + 1)) {
+
+		bool safe_zone = (safe_x - 1 <= x && x <= safe_x + 1) && (safe_y - 1 <= y && y <= safe_y + 1);
+		if (safe_zone) {
 			continue;
 		}
+		
 		char *cell = &game->cells[y * game->columns + x];
 		if (!(*cell & CELL_BOMB)) {
 			*cell |= CELL_BOMB;
@@ -111,7 +117,6 @@ static int count_adjacent_bombs(const Game *game, int x, int y) {
 			if (row == y && column == x) {
 				continue;
 			}
-			
 			if (0 > column || column >= game->columns) {
 				continue;
 			}
@@ -146,10 +151,8 @@ static void draw_field(const Game *game, const Tilemap *tilemap) {
 			
 			char cell = game->cells[y * game->columns + x];
 			if (game->state == STATE_PLAY) {
-				if (
-					(x * cell_size < mouse_x && mouse_x < (x + 1) * cell_size) &&
-				    (y * cell_size < mouse_y && mouse_y < (y + 1) * cell_size)
-				) {
+				bool mouse_over = (x * cell_size < mouse_x && mouse_x < (x + 1) * cell_size) && (y * cell_size < mouse_y && mouse_y < (y + 1) * cell_size);
+				if (mouse_over) {
 					tint = CLITERAL(Color){230, 230, 230, 255};
 				}
 				
@@ -157,15 +160,18 @@ static void draw_field(const Game *game, const Tilemap *tilemap) {
 					int danger = count_adjacent_bombs(game, x, y);
 					assert(0 <= danger && danger <= 8);
 					tile = tilemap->numbers[danger];
-				} else if (cell & CELL_FLAG) {
+				}
+				else if (cell & CELL_FLAG) {
 					tile = tilemap->flag;
 				}
 			} else if (game->state == STATE_WON) {
 				if (cell & CELL_FLAG) {
 					tile = tilemap->flag;
-				} else if (cell & CELL_BOMB) {
+				}
+				else if (cell & CELL_BOMB) {
 					tile = tilemap->bomb;
-				} else {
+				}
+				else {
 					int danger = count_adjacent_bombs(game, x, y);
 					assert(0 <= danger && danger <= 8);
 					tile = tilemap->numbers[danger];
@@ -173,9 +179,11 @@ static void draw_field(const Game *game, const Tilemap *tilemap) {
 			} else if (game->state == STATE_LOST) {
 				if (cell & CELL_BOMB) {
 					tile = tilemap->bomb;
-				} else if (cell & CELL_FLAG) {
+				}
+				else if (cell & CELL_FLAG) {
 					tile = tilemap->flag;
-				} else if (cell & CELL_KNOWN) {
+				}
+				else if (cell & CELL_KNOWN) {
 					int danger = count_adjacent_bombs(game, x, y);
 					assert(0 <= danger && danger <= 8);
 					tile = tilemap->numbers[danger];
@@ -200,7 +208,6 @@ static int reveal_adjacent_cells(Game *game, int x, int y) {
 			if (row == y && column == x) {
 				continue;
 			}
-			
 			if (0 > column || column >= game->columns) {
 				continue;
 			}
@@ -226,19 +233,25 @@ static void handle_input(Game *game) {
 	if (game->state != STATE_PLAY) {
 		return;
 	}
+
 	int x = GetMouseX() / game->cell_size;
 	int y = GetMouseY() / game->cell_size;
+
 	if (IsMouseButtonReleased(0)) {
 		char *cell = &game->cells[y * game->columns + x];
 		if (*cell & CELL_FLAG) {
 			NOOP();
-		} else if (*cell & CELL_BOMB) {
+		}
+		else if (*cell & CELL_BOMB) {
 			game->state = STATE_LOST;
-		} else if (!(*cell & CELL_KNOWN)) {
+		}
+		else if (!(*cell & CELL_KNOWN)) {
 			if (game->revealed == 0) {
 				plant_bombs(game, x, y);
 			}
+			
 			*cell |= CELL_KNOWN;
+			
 			if (count_adjacent_bombs(game, x, y) == 0) {
 				game->revealed += 1 + reveal_adjacent_cells(game, x, y);
 			}
@@ -247,9 +260,11 @@ static void handle_input(Game *game) {
 		char *cell = &game->cells[y * game->columns + x];
 		if (*cell & CELL_KNOWN) {
 			NOOP();
-		} else if (*cell & CELL_FLAG) {
+		}
+		else if (*cell & CELL_FLAG) {
 			*cell &= ~CELL_FLAG;
-		} else {
+		}
+		else {
 			*cell |= CELL_FLAG;
 		}
 	}
